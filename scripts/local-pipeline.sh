@@ -89,7 +89,7 @@ log "Building images and starting 9 nodes (VMware + OpenStack + UCS)..."
 log "This may take a few minutes on first run (building Ubuntu base image)."
 
 docker compose -f "$COMPOSE_FILE" up -d --build 2>&1 | \
-  grep -E "^(#|\[|\s*(✔|✓|=>)|Container|Network|Error)" || true
+  { grep -E "^(#|\[|\s*(✔|✓|=>)|Container|Network|Error)" || true; }
 
 ok "docker compose up complete."
 
