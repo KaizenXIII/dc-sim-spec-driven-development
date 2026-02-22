@@ -1,0 +1,15 @@
+---
+# Common variables for all dc-sim inventory hosts
+# Spec: SPEC-110
+
+ansible_user: root
+ansible_python_interpreter: /usr/bin/python3
+ansible_ssh_private_key_file: "{{ playbook_dir }}/../../infra/docker/sim-dev.key"
+ansible_ssh_common_args: >-
+  -o StrictHostKeyChecking=no
+  -o UserKnownHostsFile=/dev/null
+  -o ConnectTimeout=10
+
+# dc-sim environment metadata
+dcsim_env: dev
+dcsim_cmdb_url: "http://localhost:8080/cmdb"

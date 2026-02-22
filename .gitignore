@@ -20,6 +20,9 @@ Thumbs.db
 id_rsa
 id_ed25519
 
+# dc-sim dev SSH private key (public key sim-dev.key.pub is safe to commit)
+infra/docker/sim-dev.key
+
 # Build artifacts
 dist/
 build/

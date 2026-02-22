@@ -1,0 +1,66 @@
+---
+# dc-sim Hello World Pipeline
+# Spec: SPEC-100, SPEC-110
+#
+# Proves end-to-end connectivity from the CI/CD pipeline to all 9 simulated
+# datacenter nodes across VMware, OpenStack, and Cisco UCS platforms.
+#
+# Usage:
+#   ansible-playbook playbooks/hello-world.yml
+#   ansible-playbook playbooks/hello-world.yml --limit vmware
+#   ansible-playbook playbooks/hello-world.yml --limit ucs_blades
+
+- name: dc-sim Hello World — Simulated Datacenter Connectivity Check
+  hosts: datacenter_nodes
+  gather_facts: true
+  any_errors_fatal: false
+
+  tasks:
+
+    - name: Ping node
+      ansible.builtin.ping:
+
+    - name: Get uptime
+      ansible.builtin.command: uptime -p
+      register: uptime_result
+      changed_when: false
+
+    - name: Get OS info
+      ansible.builtin.command: cat /etc/os-release
+      register: os_release
+      changed_when: false
+
+    - name: Get hostname
+      ansible.builtin.command: hostname -f
+      register: fqdn_result
+      changed_when: false
+
+    - name: Node report
+      ansible.builtin.debug:
+        msg:
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "  Node:      {{ inventory_hostname }}"
+          - "  Platform:  {{ group_names | select('in', ['vmware','openstack','ucs_blades']) | first }}"
+          - "  OS:        {{ ansible_distribution }} {{ ansible_distribution_version }}"
+          - "  Kernel:    {{ ansible_kernel }}"
+          - "  Uptime:    {{ uptime_result.stdout }}"
+          - "  CPU:       {{ ansible_processor_vcpus }} vCPU"
+          - "  Memory:    {{ (ansible_memtotal_mb / 1024) | round(1) }} GB"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  post_tasks:
+
+    - name: Pipeline summary
+      ansible.builtin.debug:
+        msg:
+          - "╔══════════════════════════════════════════╗"
+          - "║     dc-sim Pipeline — Hello World        ║"
+          - "╠══════════════════════════════════════════╣"
+          - "║  VMware nodes:    {{ groups['vmware'] | length }}                        ║"
+          - "║  OpenStack nodes: {{ groups['openstack'] | length }}                        ║"
+          - "║  UCS blades:      {{ groups['ucs_blades'] | length }}                        ║"
+          - "╠══════════════════════════════════════════╣"
+          - "║  Total reached:   {{ ansible_play_hosts | length }} / {{ groups['datacenter_nodes'] | length }}                     ║"
+          - "╚══════════════════════════════════════════╝"
+      run_once: true
+      delegate_to: localhost

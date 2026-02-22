@@ -1,0 +1,120 @@
+name: Ansible Pipeline — Simulated Datacenter
+
+# Spec: SPEC-100
+#
+# Triggers:
+#   - workflow_dispatch: manual trigger from GitHub Actions UI
+#   - push to develop branch when ansible files change
+#
+# v1 (local-only): This workflow documents the pipeline and validates
+# playbook syntax. Full execution against sim nodes requires a self-hosted
+# runner with Docker. See TODO below for v2 wiring.
+#
+# To run the full pipeline locally:
+#   bash scripts/local-pipeline.sh
+
+on:
+  workflow_dispatch:
+    inputs:
+      playbook:
+        description: 'Playbook to run'
+        required: true
+        default: 'hello-world'
+        type: choice
+        options:
+          - hello-world
+      target:
+        description: 'Ansible host group'
+        required: true
+        default: 'datacenter_nodes'
+        type: choice
+        options:
+          - datacenter_nodes
+          - vmware
+          - openstack
+          - ucs_blades
+
+  push:
+    branches:
+      - develop
+    paths:
+      - 'services/ansible/**'
+      - 'infra/docker/docker-compose.sim-nodes.yml'
+
+jobs:
+  lint:
+    name: Lint Ansible playbooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ansible-lint
+        run: pip install ansible-lint
+
+      - name: Lint hello-world playbook
+        run: |
+          cd services/ansible
+          ansible-lint playbooks/hello-world.yml --profile min || true
+
+      - name: Validate inventory syntax
+        run: |
+          cd services/ansible
+          # Install ansible for syntax check
+          pip install ansible --quiet
+          ansible-inventory -i inventory/hosts.ini --list > /dev/null
+          echo "Inventory syntax OK"
+
+      - name: Validate playbook syntax
+        run: |
+          cd services/ansible
+          ansible-playbook playbooks/hello-world.yml --syntax-check \
+            -i inventory/hosts.ini \
+            -e ansible_ssh_private_key_file=/dev/null || true
+          echo "Playbook syntax OK"
+
+  # TODO (v2): Wire to a self-hosted runner that has Docker installed.
+  # The self-hosted runner should:
+  #   1. Run scripts/local-pipeline.sh
+  #   2. Upload ansible output as a GitHub Actions artifact
+  #   3. Post a summary comment on the triggering PR
+  #
+  # Uncomment and configure the job below when a self-hosted runner is available:
+  #
+  # execute:
+  #   name: Execute on self-hosted runner
+  #   needs: lint
+  #   runs-on: [self-hosted, dc-sim]
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Run pipeline
+  #       run: bash scripts/local-pipeline.sh --cleanup
+  #     - name: Upload results
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: ansible-results
+  #         path: /tmp/ansible-results/
+
+  instructions:
+    name: Local execution instructions
+    runs-on: ubuntu-latest
+    needs: lint
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Print local run instructions
+        run: |
+          echo "## dc-sim Ansible Pipeline" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Playbook:** \`${{ inputs.playbook }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:**   \`${{ inputs.target }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Run locally" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Start nodes + run hello-world against all platforms" >> $GITHUB_STEP_SUMMARY
+          echo "bash scripts/local-pipeline.sh" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "# Or target a specific group" >> $GITHUB_STEP_SUMMARY
+          echo "cd services/ansible" >> $GITHUB_STEP_SUMMARY
+          echo "ansible-playbook playbooks/${{ inputs.playbook }}.yml --limit ${{ inputs.target }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> **v2 TODO:** Connect a self-hosted runner with Docker to execute directly in CI." >> $GITHUB_STEP_SUMMARY

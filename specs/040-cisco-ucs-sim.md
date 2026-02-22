@@ -105,9 +105,98 @@ GET    /ucs/api/v1/fabric-interconnects  List FIs
 
 ---
 
+## Container Topology
+
+### Naming Convention
+```
+sim-ucs-ucsm             UCS Manager API service
+sim-ucs-blade-c{cc}s{ss} Blade container — chassis cc, slot ss
+                         e.g. sim-ucs-blade-c01s01  (chassis 01, slot 01)
+```
+
+### Docker Networks
+| Network name     | Subnet          | Maps to UCS concept                  |
+|------------------|----------------|--------------------------------------|
+| `dc-ucs-mgmt`    | 172.22.0.0/24  | UCS management / CIMC / KVM          |
+| `dc-ucs-data-a`  | 172.22.1.0/24  | Fabric A data path (vNIC eth0)       |
+| `dc-ucs-data-b`  | 172.22.2.0/24  | Fabric B data path (vNIC eth1)       |
+
+### Docker Object Mapping
+| UCS Object                | Docker Implementation                                  |
+|--------------------------|--------------------------------------------------------|
+| UCS Manager (UCSM)        | API container serving XML + REST endpoints             |
+| Fabric Interconnect (FI)  | No container — represented as UCSM state only          |
+| Chassis                   | No container — logical grouping in UCSM state          |
+| Blade (powered on)        | Running container on `dc-ucs-mgmt`                     |
+| Blade (powered off)       | Stopped container                                      |
+| vNIC eth0                 | Container interface on `dc-ucs-data-a`                 |
+| vNIC eth1                 | Container interface on `dc-ucs-data-b`                 |
+| vHBA fc0/fc1              | No container interface — mock FC state in UCSM         |
+| Service Profile (SP)      | Container labels + environment variables               |
+| Service Profile Template  | Docker image tag used as base for blade containers     |
+| Boot policy (power on)    | `docker start` with SP labels injected as env vars     |
+| Firmware policy           | Container label `sim.ucs.firmware`                     |
+
+### Docker Labels (per blade container)
+```
+sim.platform             = ucs
+sim.type                 = blade
+sim.id                   = blade-c01s01
+sim.guest_os             = rhel9 | ubuntu22
+sim.vcpu                 = 4
+sim.memory_mb            = 16384
+sim.power_state          = on | off
+sim.env                  = dev | staging | prod
+sim.ansible_user         = root
+sim.ssh_port             = <mapped host port>
+sim.ucs.chassis          = chassis-01
+sim.ucs.slot             = 1
+sim.ucs.sp               = SP-web-01
+sim.ucs.sp_template      = SP-Template-RHEL9
+sim.ucs.boot_policy      = SAN-Boot | PXE-Boot | Local-Boot
+sim.ucs.firmware         = 4.2(3d)
+sim.ucs.fi_a             = FI-A
+sim.ucs.fi_b             = FI-B
+```
+
+### Default Seed Topology (dev environment)
+```
+UCS Domain: ucs-domain-01
+└── FI-A / FI-B  (no containers — UCSM state only)
+    └── Chassis: chassis-01  (UCS 5108, 8 slots)
+        ├── sim-ucs-blade-c01s01  (RHEL 9,    4 vCPU, 16 GB)  → SSH :22007
+        │   SP: SP-web-01  (template: SP-Template-RHEL9)
+        ├── sim-ucs-blade-c01s02  (Ubuntu 22, 4 vCPU, 16 GB)  → SSH :22008
+        │   SP: SP-app-01  (template: SP-Template-Ubuntu)
+        └── sim-ucs-blade-c01s03  (RHEL 9,    4 vCPU, 16 GB)  → SSH :22009
+            SP: SP-db-01   (template: SP-Template-RHEL9)
+```
+
+### Service Profile Environment Variables (injected at container start)
+```bash
+UCS_SP_NAME=SP-web-01
+UCS_SP_TEMPLATE=SP-Template-RHEL9
+UCS_BOOT_POLICY=SAN-Boot
+UCS_FIRMWARE=4.2(3d)
+UCS_VNIC_ETH0_MAC=00:25:b5:00:00:01
+UCS_VNIC_ETH1_MAC=00:25:b5:00:00:02
+UCS_CHASSIS=chassis-01
+UCS_SLOT=1
+```
+
+### Ansible Inventory Groups
+```
+[ucs_blades]           all UCS blades
+[ucs_rhel]             sim.guest_os = rhel9
+[ucs_ubuntu]           sim.guest_os = ubuntu22
+[chassis_01]           sim.ucs.chassis = chassis-01
+[sp_template_rhel9]    sim.ucs.sp_template = SP-Template-RHEL9
+```
+
+---
+
 ## Open Questions
 
-- [ ] Implement full UCS XML API WSDL or REST-only convenience API?
-  → v1: REST convenience API + minimal XML endpoint for `ucsmsdk` compatibility.
-- [ ] Simulate UCSPE (Physical Emulator) Docker image as base? → Investigate feasibility.
-- [ ] FI failover simulation in scope for v1? → No, deferred.
+- [x] XML API WSDL vs REST-only → **REST convenience API + minimal XML endpoint for `ucsmsdk`.**
+- [x] UCSPE Docker image feasibility → **Not used. Custom blade containers with sshd + Python.**
+- [x] FI failover simulation → **Deferred to v2.**

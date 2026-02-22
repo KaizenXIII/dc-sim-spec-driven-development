@@ -55,7 +55,15 @@ This spec defines the technical architecture for the dc-sim platform: service bo
 ### 8. `ui`
 - Single-page application: the Glass Pane dashboard.
 - Connects to `api-gateway` via REST and WebSocket.
-- Tech: React + TypeScript (to be finalized in SPEC-120).
+- Tech: React + TypeScript (see SPEC-120).
+
+### 9. `ansible`
+- Ansible Runner service for all configuration management and automation.
+- Wraps `ansible-runner` and exposes a REST API for triggering playbooks.
+- Pulls dynamic inventory from CMDB (`GET /cmdb/ansible/inventory`).
+- Targets simulated VM containers via SSH (sshd running in each node container).
+- Used by: patch-manager (patch runs), drift-detector (remediation), CI/CD pipelines.
+- See SPEC-110 for full playbook library and runner API.
 
 ---
 
@@ -67,7 +75,7 @@ This spec defines the technical architecture for the dc-sim platform: service bo
 | WebSocket | UI ↔ api-gateway for live updates |
 | Event Bus (async) | sim-engine → cmdb → drift-detector → itsm |
 
-**Event Bus:** NATS or Redis Streams (decision deferred to SPEC-010).
+**Event Bus:** Redis Streams — resolved in [ADR-001](../docs/adr/ADR-001-event-bus.md).
 
 ---
 
@@ -75,7 +83,7 @@ This spec defines the technical architecture for the dc-sim platform: service bo
 
 | Service | Store | Rationale |
 |---------|-------|-----------|
-| cmdb | PostgreSQL + JSONB | Relational + flexible schema for CIs |
+| cmdb | PostgreSQL + JSONB | Relational + flexible schema for CIs — see [ADR-002](../docs/adr/ADR-002-cmdb-storage.md) |
 | itsm | PostgreSQL | Structured ticket data |
 | patch-manager | PostgreSQL | Patch records, schedules |
 | drift-detector | Redis | Fast ephemeral diff state |
@@ -108,7 +116,8 @@ dc-sim-spec-driven-development/
 │   ├── patch-manager/
 │   ├── drift-detector/
 │   ├── observability/
-│   └── ui/
+│   ├── ui/
+│   └── ansible/
 ├── infra/
 │   ├── docker/             # docker-compose files
 │   └── k8s/                # Kubernetes manifests
@@ -121,8 +130,11 @@ dc-sim-spec-driven-development/
 
 ---
 
-## Open Questions
+## Resolved Decisions
 
-- [ ] Event bus: NATS vs Redis Streams? → ADR-001
-- [ ] CMDB graph queries: PostgreSQL JSONB sufficient or require Neo4j? → ADR-002
-- [ ] UI framework: React vs Vue? → SPEC-120
+| Question | Decision | Reference |
+|----------|----------|-----------|
+| Event bus: NATS vs Redis Streams? | **Redis Streams** | [ADR-001](../docs/adr/ADR-001-event-bus.md) |
+| CMDB: PostgreSQL JSONB vs Neo4j? | **PostgreSQL + JSONB** | [ADR-002](../docs/adr/ADR-002-cmdb-storage.md) |
+| UI framework: React vs Vue? | **React + TypeScript** | [SPEC-120](120-glass-pane-ui.md) |
+| Ansible: standalone service or embedded? | **Standalone service #9** | This spec |

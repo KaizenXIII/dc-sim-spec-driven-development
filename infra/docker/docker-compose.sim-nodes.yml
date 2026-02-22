@@ -1,0 +1,404 @@
+---
+# dc-sim Simulated Datacenter Nodes
+# Spec: SPEC-010, SPEC-020, SPEC-030, SPEC-040
+#
+# Starts 9 simulated nodes across 3 platforms:
+#   - VMware:    3 VMs       (sim-vmw-vm-001..003,       SSH :22001-22003)
+#   - OpenStack: 3 instances (sim-os-instance-001..003,  SSH :22004-22006)
+#   - UCS:       3 blades    (sim-ucs-blade-c01s01..03,  SSH :22007-22009)
+#
+# Usage:
+#   bash scripts/local-pipeline.sh          (recommended — handles key gen + wait)
+#   docker compose -f infra/docker/docker-compose.sim-nodes.yml up -d
+
+x-sim-node: &sim-node-base
+  build:
+    dockerfile_inline: |
+      FROM ubuntu:22.04
+      ENV DEBIAN_FRONTEND=noninteractive
+      RUN apt-get update -qq && \
+          apt-get install -y --no-install-recommends \
+            openssh-server python3 python3-pip iproute2 iputils-ping curl vim && \
+          mkdir -p /run/sshd /root/.ssh && \
+          chmod 700 /root/.ssh && \
+          sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config && \
+          sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config && \
+          sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config && \
+          echo "AuthorizedKeysFile /root/.ssh/authorized_keys" >> /etc/ssh/sshd_config && \
+          apt-get clean && rm -rf /var/lib/apt/lists/*
+      COPY entrypoint.sh /entrypoint.sh
+      RUN chmod +x /entrypoint.sh
+      EXPOSE 22
+      ENTRYPOINT ["/entrypoint.sh"]
+    context: .
+  restart: unless-stopped
+
+networks:
+  # VMware networks
+  dc-vmw-mgmt:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+  dc-vmw-vm-100:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.100.0/24
+  # OpenStack networks
+  dc-os-mgmt:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.0.0/24
+  dc-os-tenant-100:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.21.100.0/24
+  # UCS networks
+  dc-ucs-mgmt:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.0.0/24
+  dc-ucs-data-a:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.22.1.0/24
+
+services:
+
+  # ─────────────────────────────────────────────
+  # VMware Simulated VMs
+  # ─────────────────────────────────────────────
+
+  sim-vmw-vm-001:
+    <<: *sim-node-base
+    container_name: sim-vmw-vm-001
+    hostname: sim-vmw-vm-001
+    ports:
+      - "22001:22"
+    networks:
+      - dc-vmw-mgmt
+      - dc-vmw-vm-100
+    volumes:
+      - ./sim-dev.key.pub:/tmp/sim-authorized-key:ro
+    labels:
+      sim.platform: "vmware"
+      sim.type: "vm"
+      sim.id: "vm-001"
+      sim.guest_os: "rhel9"
+      sim.vcpu: "2"
+      sim.memory_mb: "4096"
+      sim.power_state: "on"
+      sim.env: "dev"
+      sim.ansible_user: "root"
+      sim.ssh_port: "22001"
+      sim.vmw.cluster: "cluster-01"
+      sim.vmw.host: "sim-vmw-esxi-01"
+      sim.vmw.datastore: "ds-01"
+      sim.vmw.vswitch: "vSwitch0"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 512M
+
+  sim-vmw-vm-002:
+    <<: *sim-node-base
+    container_name: sim-vmw-vm-002
+    hostname: sim-vmw-vm-002
+    ports:
+      - "22002:22"
+    networks:
+      - dc-vmw-mgmt
+      - dc-vmw-vm-100
+    volumes:
+      - ./sim-dev.key.pub:/tmp/sim-authorized-key:ro
+    labels:
+      sim.platform: "vmware"
+      sim.type: "vm"
+      sim.id: "vm-002"
+      sim.guest_os: "ubuntu22"
+      sim.vcpu: "2"
+      sim.memory_mb: "4096"
+      sim.power_state: "on"
+      sim.env: "dev"
+      sim.ansible_user: "root"
+      sim.ssh_port: "22002"
+      sim.vmw.cluster: "cluster-01"
+      sim.vmw.host: "sim-vmw-esxi-01"
+      sim.vmw.datastore: "ds-01"
+      sim.vmw.vswitch: "vSwitch0"
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 512M
+
+  sim-vmw-vm-003:
+    <<: *sim-node-base
+    container_name: sim-vmw-vm-003
+    hostname: sim-vmw-vm-003
+    ports:
+      - "22003:22"
+    networks:
+      - dc-vmw-mgmt
+      - dc-vmw-vm-100
+    volumes:
+      - ./sim-dev.key.pub:/tmp/sim-authorized-key:ro
+    labels:
+      sim.platform: "vmware"
+      sim.type: "vm"
+      sim.id: "vm-003"
+      sim.guest_os: "rhel9"
+      sim.vcpu: "4"
+      sim.memory_mb: "8192"
+      sim.power_state: "on"
+      sim.env: "dev"
+      sim.ansible_user: "root"
+      sim.ssh_port: "22003"
+      sim.vmw.cluster: "cluster-01"
+      sim.vmw.host: "sim-vmw-esxi-02"
+      sim.vmw.datastore: "ds-01"
+      sim.vmw.vswitch: "vSwitch0"
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 512M
+
+  # ─────────────────────────────────────────────
+  # OpenStack Simulated Instances
+  # ─────────────────────────────────────────────
+
+  sim-os-instance-001:
+    <<: *sim-node-base
+    container_name: sim-os-instance-001
+    hostname: sim-os-instance-001
+    ports:
+      - "22004:22"
+    networks:
+      - dc-os-mgmt
+      - dc-os-tenant-100
+    volumes:
+      - ./sim-dev.key.pub:/tmp/sim-authorized-key:ro
+    labels:
+      sim.platform: "openstack"
+      sim.type: "instance"
+      sim.id: "instance-001"
+      sim.guest_os: "ubuntu22"
+      sim.vcpu: "1"
+      sim.memory_mb: "2048"
+      sim.power_state: "on"
+      sim.env: "dev"
+      sim.ansible_user: "root"
+      sim.ssh_port: "22004"
+      sim.os.project: "demo"
+      sim.os.flavor: "m1.small"
+      sim.os.network: "private-net"
+      sim.os.image: "ubuntu-22.04"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  sim-os-instance-002:
+    <<: *sim-node-base
+    container_name: sim-os-instance-002
+    hostname: sim-os-instance-002
+    ports:
+      - "22005:22"
+    networks:
+      - dc-os-mgmt
+      - dc-os-tenant-100
+    volumes:
+      - ./sim-dev.key.pub:/tmp/sim-authorized-key:ro
+    labels:
+      sim.platform: "openstack"
+      sim.type: "instance"
+      sim.id: "instance-002"
+      sim.guest_os: "ubuntu22"
+      sim.vcpu: "1"
+      sim.memory_mb: "2048"
+      sim.power_state: "on"
+      sim.env: "dev"
+      sim.ansible_user: "root"
+      sim.ssh_port: "22005"
+      sim.os.project: "demo"
+      sim.os.flavor: "m1.small"
+      sim.os.network: "private-net"
+      sim.os.image: "ubuntu-22.04"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  sim-os-instance-003:
+    <<: *sim-node-base
+    container_name: sim-os-instance-003
+    hostname: sim-os-instance-003
+    ports:
+      - "22006:22"
+    networks:
+      - dc-os-mgmt
+      - dc-os-tenant-100
+    volumes:
+      - ./sim-dev.key.pub:/tmp/sim-authorized-key:ro
+    labels:
+      sim.platform: "openstack"
+      sim.type: "instance"
+      sim.id: "instance-003"
+      sim.guest_os: "rhel9"
+      sim.vcpu: "1"
+      sim.memory_mb: "2048"
+      sim.power_state: "on"
+      sim.env: "dev"
+      sim.ansible_user: "root"
+      sim.ssh_port: "22006"
+      sim.os.project: "demo"
+      sim.os.flavor: "m1.small"
+      sim.os.network: "private-net"
+      sim.os.image: "rhel-9"
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  # ─────────────────────────────────────────────
+  # Cisco UCS Simulated Blades
+  # ─────────────────────────────────────────────
+
+  sim-ucs-blade-c01s01:
+    <<: *sim-node-base
+    container_name: sim-ucs-blade-c01s01
+    hostname: sim-ucs-blade-c01s01
+    ports:
+      - "22007:22"
+    networks:
+      - dc-ucs-mgmt
+      - dc-ucs-data-a
+    volumes:
+      - ./sim-dev.key.pub:/tmp/sim-authorized-key:ro
+    environment:
+      UCS_SP_NAME: "SP-web-01"
+      UCS_SP_TEMPLATE: "SP-Template-RHEL9"
+      UCS_BOOT_POLICY: "SAN-Boot"
+      UCS_FIRMWARE: "4.2(3d)"
+      UCS_VNIC_ETH0_MAC: "00:25:b5:00:00:01"
+      UCS_VNIC_ETH1_MAC: "00:25:b5:00:00:02"
+      UCS_CHASSIS: "chassis-01"
+      UCS_SLOT: "1"
+    labels:
+      sim.platform: "ucs"
+      sim.type: "blade"
+      sim.id: "blade-c01s01"
+      sim.guest_os: "rhel9"
+      sim.vcpu: "4"
+      sim.memory_mb: "16384"
+      sim.power_state: "on"
+      sim.env: "dev"
+      sim.ansible_user: "root"
+      sim.ssh_port: "22007"
+      sim.ucs.chassis: "chassis-01"
+      sim.ucs.slot: "1"
+      sim.ucs.sp: "SP-web-01"
+      sim.ucs.sp_template: "SP-Template-RHEL9"
+      sim.ucs.boot_policy: "SAN-Boot"
+      sim.ucs.firmware: "4.2(3d)"
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 512M
+
+  sim-ucs-blade-c01s02:
+    <<: *sim-node-base
+    container_name: sim-ucs-blade-c01s02
+    hostname: sim-ucs-blade-c01s02
+    ports:
+      - "22008:22"
+    networks:
+      - dc-ucs-mgmt
+      - dc-ucs-data-a
+    volumes:
+      - ./sim-dev.key.pub:/tmp/sim-authorized-key:ro
+    environment:
+      UCS_SP_NAME: "SP-app-01"
+      UCS_SP_TEMPLATE: "SP-Template-Ubuntu"
+      UCS_BOOT_POLICY: "Local-Boot"
+      UCS_FIRMWARE: "4.2(3d)"
+      UCS_VNIC_ETH0_MAC: "00:25:b5:00:00:03"
+      UCS_VNIC_ETH1_MAC: "00:25:b5:00:00:04"
+      UCS_CHASSIS: "chassis-01"
+      UCS_SLOT: "2"
+    labels:
+      sim.platform: "ucs"
+      sim.type: "blade"
+      sim.id: "blade-c01s02"
+      sim.guest_os: "ubuntu22"
+      sim.vcpu: "4"
+      sim.memory_mb: "16384"
+      sim.power_state: "on"
+      sim.env: "dev"
+      sim.ansible_user: "root"
+      sim.ssh_port: "22008"
+      sim.ucs.chassis: "chassis-01"
+      sim.ucs.slot: "2"
+      sim.ucs.sp: "SP-app-01"
+      sim.ucs.sp_template: "SP-Template-Ubuntu"
+      sim.ucs.boot_policy: "Local-Boot"
+      sim.ucs.firmware: "4.2(3d)"
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 512M
+
+  sim-ucs-blade-c01s03:
+    <<: *sim-node-base
+    container_name: sim-ucs-blade-c01s03
+    hostname: sim-ucs-blade-c01s03
+    ports:
+      - "22009:22"
+    networks:
+      - dc-ucs-mgmt
+      - dc-ucs-data-a
+    volumes:
+      - ./sim-dev.key.pub:/tmp/sim-authorized-key:ro
+    environment:
+      UCS_SP_NAME: "SP-db-01"
+      UCS_SP_TEMPLATE: "SP-Template-RHEL9"
+      UCS_BOOT_POLICY: "SAN-Boot"
+      UCS_FIRMWARE: "4.2(3d)"
+      UCS_VNIC_ETH0_MAC: "00:25:b5:00:00:05"
+      UCS_VNIC_ETH1_MAC: "00:25:b5:00:00:06"
+      UCS_CHASSIS: "chassis-01"
+      UCS_SLOT: "3"
+    labels:
+      sim.platform: "ucs"
+      sim.type: "blade"
+      sim.id: "blade-c01s03"
+      sim.guest_os: "rhel9"
+      sim.vcpu: "4"
+      sim.memory_mb: "16384"
+      sim.power_state: "on"
+      sim.env: "dev"
+      sim.ansible_user: "root"
+      sim.ssh_port: "22009"
+      sim.ucs.chassis: "chassis-01"
+      sim.ucs.slot: "3"
+      sim.ucs.sp: "SP-db-01"
+      sim.ucs.sp_template: "SP-Template-RHEL9"
+      sim.ucs.boot_policy: "SAN-Boot"
+      sim.ucs.firmware: "4.2(3d)"
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 512M

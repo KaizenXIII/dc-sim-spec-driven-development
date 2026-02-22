@@ -84,7 +84,78 @@ Returns randomized-but-realistic values with configurable noise/trend.
 
 ---
 
+## Container Topology
+
+### Naming Convention
+```
+sim-vmw-vcenter          vCenter metadata service
+sim-vmw-esxi-{n}         ESXi host node  (e.g. sim-vmw-esxi-01)
+sim-vmw-vm-{nnn}         Virtual machine (e.g. sim-vmw-vm-001)
+```
+
+### Docker Networks
+| Network name      | Subnet           | Maps to VMware concept         |
+|-------------------|-----------------|--------------------------------|
+| `dc-vmw-mgmt`     | 172.20.0.0/24   | Management network / vMotion   |
+| `dc-vmw-vm-100`   | 172.20.100.0/24 | VM traffic VLAN 100 / vSwitch0 |
+| `dc-vmw-vm-200`   | 172.20.200.0/24 | VM traffic VLAN 200 / dvSwitch |
+
+### Docker Object Mapping
+| VMware Object    | Docker Implementation                               |
+|-----------------|-----------------------------------------------------|
+| vCenter          | Metadata-only process, serves vSphere REST API      |
+| ESXi Host        | Container on `dc-vmw-mgmt`, acts as hypervisor node |
+| VM (powered on)  | Running container, SSH reachable                    |
+| VM (powered off) | Stopped container (`docker stop`)                   |
+| VM (suspended)   | Paused container (`docker pause`)                   |
+| vSwitch          | Docker bridge network                               |
+| dvSwitch         | Docker bridge network shared across hosts           |
+| Datastore        | Docker named volume pool                            |
+| vMotion          | `docker network disconnect` + reconnect to target   |
+| Snapshot         | `docker commit` + image tag                         |
+| Template clone   | `docker run` from committed image                   |
+
+### Docker Labels (per VM container)
+```
+sim.platform         = vmware
+sim.type             = vm
+sim.id               = vm-001
+sim.guest_os         = rhel9 | ubuntu22
+sim.vcpu             = 2
+sim.memory_mb        = 4096
+sim.power_state      = on | off | suspended
+sim.env              = dev | staging | prod
+sim.ansible_user     = root
+sim.ssh_port         = <mapped host port>
+sim.vmw.cluster      = cluster-01
+sim.vmw.host         = sim-vmw-esxi-01
+sim.vmw.datastore    = ds-01
+sim.vmw.vswitch      = vSwitch0
+```
+
+### Default Seed Topology (dev environment)
+```
+vCenter (sim-vmw-vcenter)
+└── Datacenter: dc-west
+    └── Cluster: cluster-01
+        ├── Host: sim-vmw-esxi-01  (172.20.0.11)
+        │   ├── sim-vmw-vm-001  (RHEL 9,    2 vCPU, 4 GB)  → SSH :22001
+        │   └── sim-vmw-vm-002  (Ubuntu 22, 2 vCPU, 4 GB)  → SSH :22002
+        └── Host: sim-vmw-esxi-02  (172.20.0.12)
+            └── sim-vmw-vm-003  (RHEL 9,    4 vCPU, 8 GB)  → SSH :22003
+```
+
+### Ansible Inventory Groups
+```
+[vmware]           all VMware VMs
+[vmware_rhel]      sim.guest_os = rhel9
+[vmware_ubuntu]    sim.guest_os = ubuntu22
+[cluster_01]       sim.vmw.cluster = cluster-01
+```
+
+---
+
 ## Open Questions
 
-- [ ] Implement full SOAP/WSDL interface (vSphere SDK) or REST-only? → Start with REST-only.
-- [ ] How many ESXi hosts to simulate by default? → TBD in seed data config.
+- [x] REST-only vs SOAP/WSDL → **REST-only for v1.**
+- [x] Default ESXi host count → **2 hosts, 3 VMs (seed topology above).**
