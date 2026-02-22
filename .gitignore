@@ -1,0 +1,62 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment files
+.env
+.env.local
+.env.*.local
+*.env
+
+# Secrets / keys
+*.pem
+*.key
+id_rsa
+id_ed25519
+
+# Build artifacts
+dist/
+build/
+bin/
+out/
+*.o
+*.so
+
+# Node / Frontend
+node_modules/
+.npm/
+.pnpm-store/
+*.tsbuildinfo
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Go
+vendor/
+
+# Docker
+docker-compose.override.yml
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+coverage/
+*.cover
+.coverage
+
+# Temp
+tmp/
+temp/

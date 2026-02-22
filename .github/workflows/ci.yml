@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+jobs:
+  detect-changes:
+    name: Detect changed services
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.changes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api-gateway: services/api-gateway/**
+            sim-engine: services/sim-engine/**
+            cmdb: services/cmdb/**
+            itsm: services/itsm/**
+            patch-manager: services/patch-manager/**
+            drift-detector: services/drift-detector/**
+            observability: services/observability/**
+            ui: services/ui/**
+
+  lint-and-test:
+    name: Lint & Test (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: ${{ needs.detect-changes.outputs.services != '[]' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up environment for ${{ matrix.service }}
+        run: |
+          cd services/${{ matrix.service }}
+          if [ -f "Makefile" ]; then make setup; fi
+      - name: Lint
+        run: |
+          cd services/${{ matrix.service }}
+          if [ -f "Makefile" ]; then make lint; else echo "No lint target, skipping."; fi
+      - name: Test
+        run: |
+          cd services/${{ matrix.service }}
+          if [ -f "Makefile" ]; then make test; else echo "No test target, skipping."; fi
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Start full stack
+        run: docker compose -f infra/docker/docker-compose.yml up -d --wait
+        timeout-minutes: 10
+      - name: Run integration tests
+        run: |
+          if [ -f scripts/integration-test.sh ]; then
+            bash scripts/integration-test.sh
+          else
+            echo "No integration tests yet. Add scripts/integration-test.sh"
+          fi
+      - name: Tear down
+        if: always()
+        run: docker compose -f infra/docker/docker-compose.yml down -v
