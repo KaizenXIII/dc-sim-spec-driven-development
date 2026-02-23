@@ -10,60 +10,72 @@
 
 ## Summary
 
-This spec defines the technical architecture for the dc-sim platform: service boundaries, communication patterns, data storage strategy, and deployment model.
+This spec defines the technical architecture for the dc-sim platform: deployable unit boundaries, communication patterns, data storage strategy, and deployment model.
+
+The architecture follows a **modular monolith + specialist workers** pattern: business logic is consolidated into three deployable units rather than nine independent microservices. This keeps operational complexity low while retaining clear internal module boundaries.
 
 ---
 
-## Services
+## Deployable Units
 
-### 1. `api-gateway`
-- Single entry point for all external clients (UI, CLI, external tooling).
-- Responsibilities: request routing, authentication (JWT), rate limiting, TLS termination.
-- Exposes: REST API on port `8080`, WebSocket endpoint on `/ws`.
+### Unit 1: `core-api`
+The platform's main API server — a modular monolith containing all business-logic modules.
 
-### 2. `sim-engine`
-- Core simulation service. Owns all simulated infrastructure objects.
-- Manages the lifecycle of fake VMs (Docker containers).
-- Exposes internal APIs consumed by other services.
-- Sub-modules: VMware Adapter, OpenStack Adapter, Cisco UCS Adapter.
+**Internal modules:**
 
-### 3. `cmdb`
-- Source of truth for all configuration items (CIs): hosts, VMs, networks, services.
-- Backed by a graph-capable store (PostgreSQL with JSONB or Neo4j).
-- Syncs state from `sim-engine` via event bus.
+| Module | Responsibilities |
+|--------|-----------------|
+| `cmdb` | NetBox proxy + CI wrapper; source of truth for all configuration items (see SPEC-050) |
+| `itsm` | Incident, problem, and change management (see SPEC-060) |
+| `patch` | Patch compliance tracking, policy management, patch run orchestration (see SPEC-070) |
+| `drift` | Desired-vs-actual state diffing; emits drift events (see SPEC-080) |
+| `ws-hub` | WebSocket broadcaster for real-time UI updates |
 
-### 4. `itsm`
-- Incident, problem, and change management.
-- Integrates with `cmdb` for impact analysis.
-- Exposes ticket CRUD API and webhook triggers.
+- Single deployable binary/container, single PostgreSQL database.
+- All modules share one REST router under `/cmdb/`, `/itsm/`, `/patch/`, `/drift/`.
+- Internal module calls are in-process; only cross-unit communication uses the event bus.
 
-### 5. `patch-manager`
-- Tracks patch compliance per CI from CMDB.
-- Schedules and records patch operations against simulated VMs.
-- Integrates with `ansible` runner.
+---
 
-### 6. `drift-detector`
-- Periodically compares desired state (stored configs) against actual state (sim-engine).
-- Emits drift events to the event bus.
-- Integrates with `cmdb` and `ansible` for remediation.
+### Unit 2: `sim-engine`
+Owns all simulated infrastructure objects and their lifecycle.
 
-### 7. `observability`
-- Collects metrics, logs, and traces from all services and simulated VMs.
-- Stack: Prometheus (metrics) + Loki (logs) + Tempo (traces) + Grafana (dashboards).
-- Exposes pre-built dashboards for datacenter health.
+**Sub-adapters:**
 
-### 8. `ui`
-- Single-page application: the Glass Pane dashboard.
-- Connects to `api-gateway` via REST and WebSocket.
-- Tech: React + TypeScript (see SPEC-120).
+| Adapter | Backed by | Exposes |
+|---------|-----------|---------|
+| VMware | `vmware/govcsim` (vcsim) — real vSphere API stub | `/vcenter/*` — SPEC-020 |
+| OpenStack | Lightweight Nova/Neutron mock | `/nova/*`, `/neutron/*` — SPEC-030 |
+| Cisco UCS | Custom UCS XML/REST mock | `/ucsm/*` — SPEC-040 |
 
-### 9. `ansible`
-- Ansible Runner service for all configuration management and automation.
-- Wraps `ansible-runner` and exposes a REST API for triggering playbooks.
-- Pulls dynamic inventory from CMDB (`GET /cmdb/ansible/inventory`).
-- Targets simulated VM containers via SSH (sshd running in each node container).
-- Used by: patch-manager (patch runs), drift-detector (remediation), CI/CD pipelines.
+- Manages Docker containers as simulated VMs (create, power, snapshot).
+- Publishes lifecycle events (`vm.created`, `vm.destroyed`, `power.changed`) to Redis Streams.
+- vcsim runs as a sidecar: `sim-engine` delegates vSphere API calls to it.
+
+---
+
+### Unit 3: `ansible-runner`
+Standalone automation engine — event-triggered or API-triggered.
+
+- Wraps the `ansible-runner` Python library.
+- Dynamic inventory sourced from NetBox via `pynetbox` (`GET /netbox/ansible/inventory`).
+- SSH targets: sim node containers (sshd running, ed25519 key auth).
+- Exposes REST API: `POST /ansible/run`, `GET /ansible/runs/{id}`.
+- Subscribes to Redis Streams: `drift.detected` → auto-remediation, `patch.scheduled` → patch runs.
 - See SPEC-110 for full playbook library and runner API.
+
+---
+
+### Infrastructure Components (not counted as units)
+
+| Component | Role |
+|-----------|------|
+| `api-gateway` | Single entry point: request routing, JWT auth, rate limiting, TLS termination |
+| `ui` | React + TypeScript SPA — Glass Pane dashboard (SPEC-120) |
+| `observability` | PLT stack: Prometheus + Loki + Tempo + Grafana (SPEC-090) |
+| `netbox` | `netboxcommunity/netbox` Docker image — DCIM/IPAM as the CMDB backend |
+| `redis` | Event bus (Redis Streams, ADR-001) |
+| `postgresql` | `core-api` application data (ITSM, patch, drift state) |
 
 ---
 
@@ -71,9 +83,10 @@ This spec defines the technical architecture for the dc-sim platform: service bo
 
 | Pattern | Used by |
 |---------|---------|
-| REST (sync) | All services for CRUD and queries |
+| REST (sync) | All units for CRUD and queries |
 | WebSocket | UI ↔ api-gateway for live updates |
-| Event Bus (async) | sim-engine → cmdb → drift-detector → itsm |
+| Event Bus (async) | sim-engine → core-api → drift → itsm |
+| inotify (in-node) | Drift detector watches file/config changes inside sim containers |
 
 **Event Bus:** Redis Streams — resolved in [ADR-001](../docs/adr/ADR-001-event-bus.md).
 
@@ -83,19 +96,18 @@ This spec defines the technical architecture for the dc-sim platform: service bo
 
 | Service | Store | Rationale |
 |---------|-------|-----------|
-| cmdb | PostgreSQL + JSONB | Relational + flexible schema for CIs — see [ADR-002](../docs/adr/ADR-002-cmdb-storage.md) |
-| itsm | PostgreSQL | Structured ticket data |
-| patch-manager | PostgreSQL | Patch records, schedules |
-| drift-detector | Redis | Fast ephemeral diff state |
-| sim-engine | In-memory + SQLite | Simulation state, fast R/W |
-| observability | Prometheus, Loki | Purpose-built time-series/log stores |
+| `netbox` (CMDB) | PostgreSQL (built-in to NetBox) | Full DCIM/IPAM — see [ADR-003](../docs/adr/ADR-003-netbox-cmdb.md) |
+| `core-api` | PostgreSQL | ITSM tickets, patch records, drift policies |
+| `sim-engine` | In-memory + SQLite | Simulation state, fast R/W |
+| `drift-detector` | Redis | Fast ephemeral diff state + inotify event buffer |
+| `observability` | Prometheus, Loki | Purpose-built time-series/log stores |
 
 ---
 
 ## Deployment Model
 
-- **Local dev:** `docker compose up` — all services + infrastructure in one command.
-- **CI:** GitHub Actions — lint, test, build per service on PR.
+- **Local dev:** `docker compose up` — all units + infrastructure in one command.
+- **CI:** GitHub Actions — lint, test, build per unit on PR.
 - **Future:** Kubernetes manifests in `/infra/k8s` for production-like deployment.
 
 ---
@@ -109,15 +121,11 @@ dc-sim-spec-driven-development/
 │   ├── adr/                # Architecture Decision Records
 │   └── rfcs/               # Request for Comments (major design discussions)
 ├── services/
-│   ├── api-gateway/
-│   ├── sim-engine/
-│   ├── cmdb/
-│   ├── itsm/
-│   ├── patch-manager/
-│   ├── drift-detector/
-│   ├── observability/
-│   ├── ui/
-│   └── ansible/
+│   ├── core-api/           # Monolith: CMDB proxy, ITSM, patch, drift, ws-hub
+│   ├── sim-engine/         # Simulation: VMware (vcsim), OpenStack, UCS adapters
+│   ├── ansible-runner/     # Ansible runner API + playbook library
+│   ├── api-gateway/        # Routing config (nginx / Traefik)
+│   └── ui/                 # React + TypeScript SPA
 ├── infra/
 │   ├── docker/             # docker-compose files
 │   └── k8s/                # Kubernetes manifests
@@ -135,6 +143,9 @@ dc-sim-spec-driven-development/
 | Question | Decision | Reference |
 |----------|----------|-----------|
 | Event bus: NATS vs Redis Streams? | **Redis Streams** | [ADR-001](../docs/adr/ADR-001-event-bus.md) |
-| CMDB: PostgreSQL JSONB vs Neo4j? | **PostgreSQL + JSONB** | [ADR-002](../docs/adr/ADR-002-cmdb-storage.md) |
+| CMDB: custom PostgreSQL JSONB vs NetBox? | **NetBox** (`netboxcommunity/netbox`) | [ADR-003](../docs/adr/ADR-003-netbox-cmdb.md) |
+| Service granularity: 9 microservices vs modular monolith? | **3 deployable units** (core-api + sim-engine + ansible-runner) | [ADR-004](../docs/adr/ADR-004-modular-monolith.md) |
+| Drift detection: polling vs event-driven? | **inotify + Docker events** (event-driven) | [ADR-005](../docs/adr/ADR-005-inotify-drift.md) |
+| VMware API: custom implementation vs vcsim? | **vcsim** (`vmware/govcsim`) | [ADR-006](../docs/adr/ADR-006-vcsim.md) |
 | UI framework: React vs Vue? | **React + TypeScript** | [SPEC-120](120-glass-pane-ui.md) |
-| Ansible: standalone service or embedded? | **Standalone service #9** | This spec |
+| Ansible: embedded vs standalone unit? | **Standalone unit** (`ansible-runner`) | This spec |

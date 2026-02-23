@@ -10,7 +10,9 @@
 
 ## Summary
 
-The ITSM service provides incident, problem, and change management workflows for the simulated datacenter. It integrates with the CMDB for CI impact analysis and with the observability stack for alert-to-incident correlation.
+The ITSM module provides incident, problem, and change management workflows for the simulated datacenter. It is a module within the `core-api` monolith (see SPEC-001) — not a standalone service. It integrates with the CMDB module (backed by NetBox) for CI impact analysis and with the observability stack for alert-to-incident correlation.
+
+**Deployment:** `services/core-api/` — internal module, same process as CMDB, patch, and drift modules.
 
 ---
 

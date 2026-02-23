@@ -10,52 +10,114 @@
 
 ## Summary
 
-The drift-detector service continuously compares the **desired state** (CMDB / Ansible configs) against the **actual state** (sim-engine) and surfaces deviations as drift events. Detected drift triggers ITSM change requests and/or Ansible remediation runs.
+The drift module continuously compares the **desired state** (NetBox CMDB / Ansible configs) against the **actual state** (sim-engine + in-node file watchers) and surfaces deviations as drift events. Detected drift triggers ITSM change requests and/or `ansible-runner` remediation runs.
+
+The drift module is part of the `core-api` monolith (see SPEC-001) — not a standalone service.
+
+**Resolved:** Polling vs event-driven drift detection → **inotify + Docker events** ([ADR-005](../docs/adr/ADR-005-inotify-drift.md)).
 
 ---
 
 ## Drift Detection Model
 
 ```
-Desired State (CMDB / Git)
+Desired State (NetBox / Git)
          │
          ▼
-   Drift Detector ──── compares ────> Actual State (sim-engine)
+   Drift Module (core-api) ──── compares ────> Actual State
+         │                                           │
+         │                               ┌───────────┴────────────┐
+         │                               │                        │
+         │                       sim-engine events         inotify agents
+         │                       (container lifecycle)     (in-node file watchers)
          │
          ▼
-   Drift Events
+   Drift Events (Redis Streams: drift.detected)
    ├── emit to event bus
    ├── create ITSM change request
-   └── optionally trigger Ansible remediation
+   └── optionally trigger ansible-runner remediation
 ```
+
+---
+
+## Detection Sources
+
+### 1. Docker Event Stream (infrastructure drift)
+`sim-engine` watches the Docker daemon event stream and publishes to Redis Streams:
+
+| Docker event | Drift type | Example |
+|-------------|-----------|---------|
+| `container stop` (unexpected) | State drift | VM powered off, CMDB says it should be running |
+| `container start` (unexpected) | State drift | VM booted without approved CRQ |
+| `network connect/disconnect` | Network drift | Container connected to wrong Docker network |
+
+### 2. inotify File Watchers (in-node configuration drift)
+A lightweight `drift-agent` runs inside each sim node container, watching key config paths:
+
+```
+/etc/ssh/sshd_config        SSH configuration
+/etc/hosts                  Hostname/DNS config
+/etc/resolv.conf            DNS resolver config
+/etc/sysctl.conf            Kernel parameters
+/etc/sudoers                Privilege escalation policy
+/etc/passwd, /etc/shadow    User accounts (security drift)
+```
+
+When a watched file changes, the agent publishes to Redis Streams:
+```json
+{
+  "event": "drift.file_changed",
+  "ci_id": "sim-vmw-vm-001",
+  "path": "/etc/sshd_config",
+  "diff": "<unified diff>",
+  "detected_at": "2026-02-22T10:00:00Z"
+}
+```
+
+**Drift agent:** minimal shell script using `inotifywait` (from `inotify-tools` package):
+```bash
+inotifywait -m -r /etc/ssh /etc/sysctl.conf /etc/sudoers \
+  --format '{"path":"%w%f","event":"%e"}' \
+  | while read -r event; do
+      redis-cli -h redis XADD drift.file_changed '*' payload "$event" ci_id "$HOSTNAME"
+    done
+```
+
+### 3. Ansible Facts (package and compliance drift)
+`ansible-runner` runs `collect-facts.yml` on schedule, pushing gathered facts to NetBox. The drift module diffs incoming facts against the NetBox desired-state baseline to detect:
+- Unauthorized packages installed
+- Service state changes
+- CIS benchmark regressions
 
 ---
 
 ## Drift Categories
 
-| Category | Example |
-|----------|---------|
-| **Configuration drift** | VM CPU count changed outside of approved process |
-| **Package drift** | Package installed that is not in approved baseline |
-| **Network drift** | VM connected to unexpected VLAN |
-| **State drift** | VM powered off but CMDB says it should be running |
-| **Security drift** | Firewall rule added that is not in policy |
-| **Firmware drift** | Blade running firmware not matching UCS policy |
+| Category | Detection source | Example |
+|----------|-----------------|---------|
+| **Configuration drift** | inotify file watcher | sshd_config modified outside of Ansible |
+| **Package drift** | Ansible facts | Package installed that is not in approved baseline |
+| **Network drift** | Docker event stream | VM connected to unexpected Docker network |
+| **State drift** | Docker event stream | VM powered off but NetBox says it should be running |
+| **Security drift** | inotify + Ansible facts | /etc/sudoers modified, unauthorized user added |
+| **Firmware drift** | sim-engine UCS adapter | Blade running firmware not matching UCS service profile |
 
 ---
 
-## Detection Cycle
+## Detection Cycle (event-driven)
 
-1. **Collect desired state** from CMDB (CI attributes + Ansible inventory/vars).
-2. **Collect actual state** from sim-engine (`GET /sim/state`).
-3. **Diff** the two state representations.
+Events flow into the drift module via Redis Streams subscriptions:
+
+1. **Receive event** from `drift.file_changed`, `vm.power_changed`, `network.changed`, or `ansible.facts_collected`.
+2. **Fetch desired state** from NetBox for the affected CI.
+3. **Diff** actual vs desired for the relevant fields.
 4. For each delta:
-   - Record drift event with: `ci_id`, `field`, `desired_value`, `actual_value`, `detected_at`.
-   - Emit `drift.detected` event on event bus.
+   - Record drift event: `ci_id`, `field`, `desired_value`, `actual_value`, `detected_at`.
+   - Emit `drift.detected` on Redis Streams.
    - Create ITSM change request if `auto_change_request = true` in drift policy.
-   - Trigger Ansible remediation if `auto_remediate = true` in drift policy.
+   - Trigger `ansible-runner` remediation if `auto_remediate = true` in drift policy.
 
-**Cycle interval:** Configurable, default 5 minutes.
+**No scheduled polling.** All detection is event-driven. Reconciliation on demand via `POST /drift/reconcile`.
 
 ---
 
@@ -83,12 +145,15 @@ Desired State (CMDB / Git)
 GET    /drift/events                  List drift events (filterable by status, ci, category)
 GET    /drift/events/{id}             Get drift event details
 POST   /drift/events/{id}/acknowledge Acknowledge drift (suppress alerts)
-POST   /drift/events/{id}/remediate   Trigger Ansible remediation for this drift
+POST   /drift/events/{id}/remediate   Trigger ansible-runner remediation for this drift
 
 # Policies
 GET    /drift/policies                List drift policies
 POST   /drift/policies                Create policy
 PATCH  /drift/policies/{id}           Update policy
+
+# On-demand reconciliation
+POST   /drift/reconcile               Full desired-vs-actual sweep for all CIs
 
 # Reports
 GET    /drift/report                  Summary: drift count by CI type, category, severity
@@ -103,15 +168,15 @@ GET    /drift/report/timeline         Drift events over time (for dashboard char
 drift.detected event
        │
        ▼
-drift-detector checks policy.auto_remediate
+drift module checks policy.auto_remediate
        │
    YES │                  NO │
        ▼                     ▼
-Trigger Ansible          Create ITSM CRQ
-remediation playbook     (manual remediation)
+POST /ansible/run        Create ITSM CRQ
+(remediation playbook)   (manual remediation)
        │
        ▼
-Re-check actual state
+Re-check via next event or /drift/reconcile
        │
    RESOLVED │         STILL DRIFTED │
        ▼                    ▼
@@ -122,6 +187,6 @@ Close drift event     Escalate to incident
 
 ## Open Questions
 
-- [ ] How granular should field-level diffing be for JSONB CI attributes?
+- [ ] How granular should field-level diffing be for NetBox custom fields?
 - [ ] Drift suppression: allow approved deviations (exceptions) in v1?
-- [ ] Real-time drift via event stream vs. polling? → Polling v1, events v2.
+- [x] Real-time drift via event stream vs. polling? → **Event-driven via inotify + Docker events** ([ADR-005](../docs/adr/ADR-005-inotify-drift.md)).

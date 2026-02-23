@@ -10,27 +10,28 @@
 
 ## Summary
 
-This spec defines how Ansible is integrated into dc-sim for configuration management, patch operations, drift remediation, and infrastructure automation. Ansible targets simulated VMs (Docker containers with sshd) via a dynamic inventory sourced from the CMDB.
+This spec defines how Ansible is integrated into dc-sim for configuration management, patch operations, drift remediation, and infrastructure automation. Ansible targets simulated VMs (Docker containers with sshd) via a dynamic inventory sourced from NetBox (via `core-api`).
+
+**Deployment:** `ansible-runner` is a standalone deployable unit — Unit 3 in SPEC-001. It lives at `services/ansible-runner/` and is event-triggered (Redis Streams) or API-triggered (REST `POST /ansible/run`). Not embedded in `core-api`.
 
 ---
 
 ## Architecture
 
 ```
-┌─────────────┐      dynamic inventory      ┌──────────┐
-│   Ansible   │ ──────────────────────────> │   CMDB   │
-│   Runner    │                              └──────────┘
-│             │      SSH                    ┌──────────────────┐
-│             │ ──────────────────────────> │ Simulated VMs    │
-└─────────────┘                             │ (containers with │
-       │                                    │  sshd running)   │
-       │ reports results                    └──────────────────┘
-       ▼
-┌─────────────┐
-│  CMDB /     │
-│  Patch Mgr  │
-│  Drift Det  │
-└─────────────┘
+┌─────────────────┐    GET /cmdb/ansible/inventory    ┌──────────────────┐
+│  ansible-runner │ ───────────────────────────────> │  core-api        │
+│  (Unit 3)       │                                   │  (NetBox proxy)  │
+│                 │      SSH                          └──────────────────┘
+│                 │ ──────────────────────────────>  ┌──────────────────┐
+└────────┬────────┘                                  │ Simulated VMs    │
+         │                                           │ (containers with │
+         │  POST /ansible/run  ◄── Redis Streams     │  sshd running)   │
+         │  (drift.detected, patch.scheduled)        └──────────────────┘
+         │
+         │  reports results back via Redis Streams
+         ▼
+   ansible.run.completed → core-api (patch module, drift module)
 ```
 
 ---
@@ -62,7 +63,7 @@ Groups are derived from CI tags in CMDB (OS, environment, platform, role).
 
 ## Playbook Library
 
-All playbooks live under `/services/ansible/playbooks/`:
+All playbooks live under `services/ansible-runner/playbooks/`:
 
 ### Infrastructure Provisioning
 ```
@@ -106,7 +107,7 @@ collect-facts.yml            # Gather and push facts to CMDB
 
 ## Ansible Roles
 
-Reusable roles in `/services/ansible/roles/`:
+Reusable roles in `services/ansible-runner/roles/`:
 
 | Role | Purpose |
 |------|---------|
@@ -167,7 +168,7 @@ The container entrypoint copies it to `/root/.ssh/authorized_keys` on first boot
 ### Ansible Connection Config (`group_vars/all.yml`)
 ```yaml
 ansible_user: root
-ansible_ssh_private_key_file: "{{ playbook_dir }}/../../infra/docker/sim-dev.key"
+ansible_ssh_private_key_file: "{{ playbook_dir }}/../../../infra/docker/sim-dev.key"
 ansible_python_interpreter: /usr/bin/python3
 ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
 ```

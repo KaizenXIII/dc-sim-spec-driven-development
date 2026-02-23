@@ -12,6 +12,8 @@
 
 The Glass Pane is the single-pane-of-glass web dashboard for the dc-sim platform. It provides a unified view of the simulated datacenter: infrastructure health, CMDB, ITSM tickets, drift events, patch compliance, and observability. Built as a React + TypeScript SPA connecting to the API Gateway.
 
+**Deployment:** `services/ui/` — static SPA served via `api-gateway`. Connects to `api-gateway` which routes to `core-api`, `sim-engine`, and `ansible-runner` (the 3 units — see SPEC-001). CMDB views are powered by the `core-api` NetBox proxy (SPEC-050).
+
 ---
 
 ## Core Views

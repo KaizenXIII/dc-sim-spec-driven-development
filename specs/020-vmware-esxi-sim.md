@@ -30,10 +30,19 @@ This spec defines the VMware/ESXi simulation adapter within the sim-engine. It e
 
 ---
 
-## API Surface (vSphere-compatible)
+## API Surface (vSphere-compatible via vcsim)
 
-The adapter exposes a subset of the VMware vSphere REST API v7.0+:
+The VMware adapter is **backed by `vmware/govcsim` (vcsim)** — a real vSphere API simulator written in Go. vcsim runs as a sidecar container inside `sim-engine` and serves the full vSphere REST + SOAP API surface. This means existing VMware tooling connects without modification.
 
+**vcsim sidecar:**
+```
+sim-engine container
+├── sim-engine process  (manages Docker containers as VMs)
+└── vcsim sidecar       (serves vSphere API on :8989)
+    └── endpoint: https://sim-vmw-vcenter:8989/sdk
+```
+
+**vSphere REST endpoints (served by vcsim):**
 ```
 GET    /vcenter/datacenter                List datacenters
 GET    /vcenter/cluster                   List clusters
@@ -47,6 +56,12 @@ PATCH  /vcenter/vm/{vm}/hardware/cpu      Reconfigure CPU
 PATCH  /vcenter/vm/{vm}/hardware/memory   Reconfigure memory
 GET    /vcenter/datastore                 List datastores
 GET    /vcenter/network                   List networks
+```
+
+**vcsim credentials (dev):**
+```
+GOVC_URL=https://user:pass@127.0.0.1:8989/sdk
+GOVC_INSECURE=1
 ```
 
 ---
@@ -78,9 +93,16 @@ Returns randomized-but-realistic values with configurable noise/trend.
 
 ## Tooling Compatibility Targets
 
-- `govc` CLI — basic VM and host operations
-- Terraform `vsphere` provider — VM provisioning workflows
-- Ansible `community.vmware` collection — VM management playbooks
+Because vcsim serves the real vSphere API, these tools connect **without stubbing or modification**:
+
+| Tool | Use case |
+|------|---------|
+| `govc` CLI | Basic VM and host operations |
+| Terraform `vsphere` provider | VM provisioning workflows |
+| Ansible `community.vmware` collection | VM management playbooks |
+| PowerCLI | Windows-side VMware automation testing |
+
+**Resolved:** API implementation strategy — custom mock vs vcsim → **vcsim** ([ADR-006](../docs/adr/ADR-006-vcsim.md))
 
 ---
 
@@ -157,5 +179,6 @@ vCenter (sim-vmw-vcenter)
 
 ## Open Questions
 
-- [x] REST-only vs SOAP/WSDL → **REST-only for v1.**
+- [x] REST-only vs SOAP/WSDL → **Both, via vcsim (serves both REST and SOAP/SDK).**
 - [x] Default ESXi host count → **2 hosts, 3 VMs (seed topology above).**
+- [x] VMware API: custom implementation vs vcsim? → **vcsim** ([ADR-006](../docs/adr/ADR-006-vcsim.md)).

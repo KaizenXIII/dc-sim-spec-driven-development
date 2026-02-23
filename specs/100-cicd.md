@@ -46,11 +46,22 @@ PR Opened
                                           └──────────────┘
 ```
 
+### Deployable Units (3 core + infrastructure)
+
+Per SPEC-001, the platform builds three deployable unit images:
+
+| Image | Directory | Build trigger |
+|-------|-----------|--------------|
+| `dc-sim/core-api` | `services/core-api/` | Changes under `services/core-api/**` |
+| `dc-sim/sim-engine` | `services/sim-engine/` | Changes under `services/sim-engine/**` |
+| `dc-sim/ansible-runner` | `services/ansible-runner/` | Changes under `services/ansible-runner/**` |
+| `dc-sim/ui` | `services/ui/` | Changes under `services/ui/**` |
+
 ### GitHub Actions Workflows
 
 | Workflow File | Trigger | Purpose |
 |---------------|---------|---------|
-| `ci.yml` | PR open / push | Lint, build, unit test all services |
+| `ci.yml` | PR open / push | Lint, build, unit test per deployable unit |
 | `integration.yml` | PR merge to main | Full docker-compose up + integration tests |
 | `security-scan.yml` | Nightly | Trivy image scan + Semgrep SAST |
 | `release.yml` | Tag push `v*` | Build + push Docker images to GHCR |

@@ -10,7 +10,9 @@
 
 ## Summary
 
-The patch-manager service tracks patch compliance across all simulated CIs and orchestrates patch operations via Ansible. Every patch run is linked to an approved ITSM change request.
+The patch module tracks patch compliance across all simulated CIs and orchestrates patch operations via `ansible-runner`. Every patch run is linked to an approved ITSM change request. It is a module within the `core-api` monolith (see SPEC-001) — not a standalone service.
+
+**Deployment:** `services/core-api/` — internal module, shares process with CMDB, ITSM, and drift modules.
 
 ---
 
@@ -95,7 +97,17 @@ GET    /patch/advisories/{cve_id}     Get CVE details and affected CIs
 
 ## Ansible Integration
 
-Patch execution uses Ansible playbooks located in `/services/patch-manager/playbooks/`:
+Patch execution triggers `ansible-runner` (Unit 3 in SPEC-001) via REST:
+```
+POST /ansible/run
+{
+  "playbook": "patch-rhel.yml",
+  "limit": "rhel_nodes",
+  "extra_vars": { "patch_run_id": "run-abc123" }
+}
+```
+
+Playbooks are located in `services/ansible-runner/playbooks/`:
 
 ```
 playbooks/

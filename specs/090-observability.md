@@ -12,6 +12,8 @@
 
 The observability stack provides metrics, logs, and traces for both the simulated infrastructure and the platform services themselves. It uses the industry-standard PLT stack (Prometheus, Loki, Tempo) with Grafana as the unified visualization layer.
 
+**Deployment:** Infrastructure component (not one of the 3 core units — see SPEC-001). Deployed alongside `core-api`, `sim-engine`, and `ansible-runner` via `docker compose`. All three units expose `/metrics` and ship structured logs to Loki.
+
 ---
 
 ## Three Pillars
