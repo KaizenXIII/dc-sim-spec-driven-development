@@ -1,116 +1,141 @@
-# dc-sim-spec-driven-development
+# dc-sim — Hybrid Datacenter Simulation Platform
 
-A **hybrid datacenter simulation platform** built using **Spec-Driven Development (SDD)** practices on GitHub.
+A **hybrid datacenter simulation platform** built using **Spec-Driven Development (SDD)** practices on GitHub. It models a realistic enterprise multi-vendor datacenter — VMware/ESXi, OpenStack, and Cisco UCS — using Docker containers as fake VMs, with a full DevOps/SRE platform built on top: CMDB, ITSM, patch management, drift detection, observability, CI/CD pipelines, Ansible configuration management, and a single-pane-of-glass dashboard.
 
-Simulates a realistic enterprise datacenter — VMware/ESXi, OpenStack, and Cisco UCS — using Docker containers as fake VMs. Built on top is a full DevOps/SRE platform: CMDB, ITSM, patch management, drift detection, observability, CI/CD, Ansible automation, and a single-pane-of-glass dashboard.
-
----
-
-## What This Project Is
-
-| Layer | What it does |
-|-------|-------------|
-| **Simulation Engine** | Manages simulated hosts, VMs (containers), networks. Exposes vSphere, OpenStack, and UCS APIs. |
-| **CMDB** | Source of truth for all configuration items and their relationships. |
-| **ITSM** | Incident, problem, and change management. |
-| **Patch Manager** | Tracks and orchestrates patch compliance via Ansible. |
-| **Drift Detector** | Compares desired vs. actual state; triggers remediation. |
-| **Observability** | Prometheus + Loki + Tempo + Grafana stack. |
-| **CI/CD** | GitHub Actions pipelines for the platform and simulated deployments. |
-| **Ansible** | Configuration management and automation against simulated VMs. |
-| **Glass Pane UI** | React dashboard — single pane of glass for the full datacenter. |
+> **Current status:** Specs are in Draft. The simulated node layer (9 containers) and the Ansible hello-world pipeline are working. Application services are not yet implemented.
 
 ---
 
-## How This Project Is Built (Spec-Driven Development)
-
-Every feature follows this workflow:
+## Architecture
 
 ```
-1. Write a spec file in specs/
-2. Open a GitHub Issue using the Spec template → gets Issue number
-3. Update spec file with Issue number
-4. Get spec reviewed and approved on the Issue
-5. Open PRs referencing the spec (CI enforces this)
-6. Mark spec as Implemented when all criteria are met
+┌─────────────────────────────────────────────────────────┐
+│                    Glass Pane UI                        │
+│              (Single Pane of Glass Dashboard)           │
+└────────────────────────┬────────────────────────────────┘
+                         │ REST / WebSocket
+┌────────────────────────▼────────────────────────────────┐
+│                    API Gateway                          │
+└──┬──────────┬──────────┬──────────┬──────────┬──────────┘
+   │          │          │          │          │
+┌──▼──┐  ┌───▼───┐  ┌───▼──┐  ┌───▼───┐  ┌───▼────────┐
+│CMDB │  │ ITSM  │  │Patch │  │Drift  │  │Observability│
+│     │  │       │  │ Mgr  │  │Detect │  │& Logging   │
+└──┬──┘  └───────┘  └───┬──┘  └───┬───┘  └────────────┘
+   │                    │         │
+┌──▼────────────────────▼─────────▼──────────────────────┐
+│                  Simulation Engine                      │
+│     VMware API Sim │ OpenStack API Sim │ UCS API Sim   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐             │
+│  │ vm-001   │  │ vm-002   │  │ vm-003   │ (fake VMs)  │
+│  └──────────┘  └──────────┘  └──────────┘             │
+└────────────────────────────────────────────────────────┘
 ```
 
-**Read the specs before writing any code.** The `specs/` directory is the authoritative source for what should be built and why.
+---
+
+## Spec-Driven Development
+
+Every feature follows this mandatory workflow — no code ships without an approved spec:
+
+1. Write a spec file in `specs/`
+2. Open a GitHub Issue using the Spec template
+3. Get spec reviewed and approved
+4. Open PRs referencing the spec (CI enforces via `spec-check.yml`)
+5. Mark spec as Implemented when all criteria are met
 
 ---
 
 ## Spec Index
 
 | Spec | Title | Status |
-|------|-------|--------|
-| [SPEC-000](specs/000-overview.md) | Project Overview | Draft |
-| [SPEC-001](specs/001-architecture.md) | System Architecture | Draft |
-| [SPEC-010](specs/010-simulation-layer.md) | Simulation Engine | Draft |
-| [SPEC-020](specs/020-vmware-esxi-sim.md) | VMware/ESXi Simulation | Draft |
-| [SPEC-030](specs/030-openstack-sim.md) | OpenStack Simulation | Draft |
-| [SPEC-040](specs/040-cisco-ucs-sim.md) | Cisco UCS Simulation | Draft |
-| [SPEC-050](specs/050-cmdb.md) | CMDB | Draft |
-| [SPEC-060](specs/060-itsm.md) | ITSM | Draft |
-| [SPEC-070](specs/070-patch-management.md) | Patch Management | Draft |
-| [SPEC-080](specs/080-drift-detection.md) | Drift Detection | Draft |
-| [SPEC-090](specs/090-observability.md) | Observability & Logging | Draft |
-| [SPEC-100](specs/100-cicd.md) | CI/CD Pipelines | Draft |
-| [SPEC-110](specs/110-ansible-config-mgmt.md) | Ansible & Config Mgmt | Draft |
-| [SPEC-120](specs/120-glass-pane-ui.md) | Glass Pane Dashboard | Draft |
+|---|---|---|
+| SPEC-000 | Project Overview | Draft |
+| SPEC-001 | System Architecture | Draft |
+| SPEC-010 | Simulation Engine | Draft |
+| SPEC-020 | VMware/ESXi Simulation | Draft |
+| SPEC-030 | OpenStack Simulation | Draft |
+| SPEC-040 | Cisco UCS Simulation | Draft |
+| SPEC-050 | CMDB | Draft |
+| SPEC-060 | ITSM | Draft |
+| SPEC-070 | Patch Management | Draft |
+| SPEC-080 | Drift Detection | Draft |
+| SPEC-090 | Observability & Logging | Draft |
+| SPEC-100 | CI/CD Pipelines | Draft |
+| SPEC-110 | Ansible & Config Mgmt | Draft |
+| SPEC-120 | Glass Pane Dashboard | Draft |
 
 ---
 
-## Repository Structure
-
-```
-dc-sim-spec-driven-development/
-├── specs/                  # SDD spec files (read these first)
-├── docs/
-│   ├── adr/                # Architecture Decision Records
-│   └── rfcs/               # Request for Comments
-├── services/
-│   ├── api-gateway/        # SPEC-001
-│   ├── sim-engine/         # SPEC-010
-│   ├── cmdb/               # SPEC-050
-│   ├── itsm/               # SPEC-060
-│   ├── patch-manager/      # SPEC-070
-│   ├── drift-detector/     # SPEC-080
-│   ├── observability/      # SPEC-090
-│   └── ui/                 # SPEC-120
-├── infra/
-│   ├── docker/             # docker-compose files
-│   └── k8s/                # Kubernetes manifests
-├── scripts/                # Dev/ops helper scripts
-└── .github/
-    ├── ISSUE_TEMPLATE/     # Spec, Bug, Task templates
-    └── workflows/          # GitHub Actions (CI + spec-check)
-```
-
----
-
-## Getting Started
-
-> Services are not yet implemented. Specs are in Draft status. See `specs/` to follow progress.
+## Quick Start: Simulated Datacenter Nodes
 
 ```bash
-# Clone
 git clone https://github.com/KaizenXIII/dc-sim-spec-driven-development.git
 cd dc-sim-spec-driven-development
 
-# (Once implemented) Start full stack
-docker compose -f infra/docker/docker-compose.yml up
+# Start nodes, run hello-world playbook, leave containers up
+bash scripts/local-pipeline.sh
+
+# Start, run, then tear everything down
+bash scripts/local-pipeline.sh --cleanup
+
+# Tear down running containers
+bash scripts/local-pipeline.sh --down
 ```
+
+### Simulated Node Topology
+
+| Container | Platform | Guest OS | SSH Port |
+|---|---|---|---|
+| `sim-vmw-vm-001` | VMware | RHEL 9 | 22001 |
+| `sim-vmw-vm-002` | VMware | Ubuntu 22 | 22002 |
+| `sim-vmw-vm-003` | VMware | RHEL 9 | 22003 |
+| `sim-os-instance-001` | OpenStack | Ubuntu 22 | 22004 |
+| `sim-os-instance-002` | OpenStack | Ubuntu 22 | 22005 |
+| `sim-os-instance-003` | OpenStack | RHEL 9 | 22006 |
+| `sim-ucs-blade-c01s01` | Cisco UCS | RHEL 9 | 22007 |
+| `sim-ucs-blade-c01s02` | Cisco UCS | Ubuntu 22 | 22008 |
+| `sim-ucs-blade-c01s03` | Cisco UCS | RHEL 9 | 22009 |
+
+---
+
+## Running Ansible Playbooks
+
+```bash
+cd services/ansible
+
+# Run hello-world against all 9 nodes
+ansible-playbook playbooks/hello-world.yml
+
+# Target a single platform
+ansible-playbook playbooks/hello-world.yml --limit vmware
+ansible-playbook playbooks/hello-world.yml --limit openstack
+ansible-playbook playbooks/hello-world.yml --limit ucs_blades
+```
+
+---
+
+## CI/CD Workflows
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci.yml` | Push to `main`/`develop`, all PRs | Detects changed services, runs lint + test per service |
+| `spec-check.yml` | All PRs | Fails if a PR touching `services/` or `infra/` has no spec reference |
+| `ansible-pipeline.yml` | Manual dispatch or push to `develop` | Lints playbooks and validates syntax |
 
 ---
 
 ## Architecture Decisions
 
-See [docs/adr/](docs/adr/) for recorded architecture decisions:
-- [ADR-001: Event Bus Selection](docs/adr/ADR-001-event-bus.md)
-- [ADR-002: CMDB Storage Backend](docs/adr/ADR-002-cmdb-storage.md)
+- **[ADR-001: Event Bus](docs/adr/ADR-001-event-bus.md)** — Redis Streams chosen over NATS/Kafka
+- **[ADR-002: CMDB Storage](docs/adr/ADR-002-cmdb-storage.md)** — PostgreSQL + JSONB chosen over Neo4j
 
 ---
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full Spec-Driven Development workflow. The short version: write a spec first, get it approved, then implement with `Spec: SPEC-XXX` in your PR body.
+
+## License
+
+No license file is present in this repository.
